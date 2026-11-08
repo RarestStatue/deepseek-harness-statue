@@ -39,6 +39,8 @@ Every Remote endpoint is access-controlled: a Peer whose principal is not the ow
 
 `events` reads one chronological page from a durable cut and returns its records, `hasMore`, and an inclusive `cursor`; omitting `throughSeq` selects the observed log end, and the compatible `page` method carries the same read with a deprecated entry point. `events`, `observeEvent`, and `follow` take an Address; projection and state operations take a Session ID. Page reads and Follow openings validate the supplied Address. Pure `observeEvent` and `observeProjections` subscriptions neither acquire an Observation nor establish existence: their `ready` frame carries no snapshot cursor.
 
+`askApproval` streams a model answer about one pending tool approval for the approval card. It resolves the Session's Agent, rejects blank or oversized questions, uses the current `request/header` provider/model, and sends a fixed instruction plus the pending call's name, lossless JSON arguments, approval reason, earlier side-conversation exchanges, and the question; it yields text deltas until the call finishes. The request appends no Session event and changes no Session state. It is UI assistance: the exchange never enters the Session surface or log, and it is not an authorization input.
+
 List rows carry `formatStatus` when available, so Clients can identify migration-required Sessions without requesting their projections.
 
 Host list generation yields between complete rows only when its configured work slice is exhausted; cheap remaining work returns without a forced yield. Request cancellation is checked per row and after each yield and rejects without partial results. Each row is synchronous; the list does not promise one cross-Session snapshot. A Session already queued as cold remains a cached row if it attaches during a yield: Client in-flight mutation replay corrects its availability, and sequenced projections supersede cached hints.
@@ -113,11 +115,19 @@ Blockquotes travel as ordinary prompt text without quote metadata. Local submiss
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as invoked Agent commands own any model-visible effect.
+### Approval side question
+
+#### What the model sees
+
+Invoked Agent commands own the Session's model-visible conversation effects. `session.askApproval` additionally sends one auxiliary request per approval-card question: a fixed instruction, the pending call's name and lossless JSON arguments, the approval reason, the side conversation's earlier exchanges, and the question, through the Session's current `request/header` provider/model with an output-token cap and no tools. The answer streams to the Client only; the exchange is not persisted, not replayed, and never enters the Session surface.
+
+#### Token effect
+
+One additional, uncached request per asked question. The Session's conversation requests are unchanged.
 
 #### KV Cache effect
 
-No direct effect; model requests remain owned by the Agent and LLM packages.
+No effect on the Session's conversation; each side question is a standalone request outside its cached prefix.
 
 ## Known Limitations and Deferred Work
 

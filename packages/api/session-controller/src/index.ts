@@ -31,8 +31,10 @@ import { buildModelCatalog, hasProviderApiKey } from './catalog.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import { SessionMediaReferences } from './media-references.ts'
 import { ArchivedSessionGate } from './archived-session-gate.ts'
+import { streamApprovalQuestion } from './approval-question.ts'
 import type {
   ModelCatalog,
+  SessionApprovalQuestionRequest,
   SessionWorkspacePathApplication,
   SessionAddress,
   SessionAttachmentRequest,
@@ -516,6 +518,33 @@ export class SessionController extends TypertRemoteService {
   @Remote('cancel')
   cancel(request: SessionCancelRequest): SessionCancelValue {
     return this.commands.cancel(request)
+  }
+
+  /**
+   * Stream a model answer about one pending tool approval for the approval
+   * card. Resolves the Session's live Agent, then asks the Session's current
+   * `request/header` provider/model to explain the pending call. The request
+   * appends no Session event and changes no Session state: the exchange is UI
+   * assistance and never enters the Session log or surface.
+   * @param request - Session, pending call identity and arguments, approval
+   *   reason, earlier side-conversation exchanges, and the question.
+   * @param signal - cancellation owned by the Remote stream carrier.
+   * @returns text deltas of one answer, in generation order.
+   * @throws {RemoteError} `session/not-found` or the resolver's stable failure
+   *   when the Session cannot be resolved.
+   * @throws {RemoteError} `gateway/bad-request` when the request violates a
+   *   question or payload bound.
+   * @throws {RemoteError} `session/approval-question-failed` when the Session
+   *   has no recorded model route, or the model call fails.
+   */
+  @Remote({ mode: 'stream' })
+  async *askApproval(
+    request: SessionApprovalQuestionRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<string> {
+    const found = await this.resolveAgent(request.sessionId)
+    if ('error' in found) throw found.error
+    yield * streamApprovalQuestion(this.ctx, found.agent, request, signal)
   }
 
   /**

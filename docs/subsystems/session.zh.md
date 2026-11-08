@@ -986,6 +986,25 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('cancel') cancel(request: SessionCancelRequest): SessionCancelValue
 
 /**
+ * Stream a model answer about one pending tool approval for the approval
+ * card. Resolves the Session's live Agent, then asks the Session's current
+ * `request/header` provider/model to explain the pending call. The request
+ * appends no Session event and changes no Session state: the exchange is UI
+ * assistance and never enters the Session log or surface.
+ * @param request - Session, pending call identity and arguments, approval
+ *   reason, earlier side-conversation exchanges, and the question.
+ * @param signal - cancellation owned by the Remote stream carrier.
+ * @returns text deltas of one answer, in generation order.
+ * @throws {RemoteError} `session/not-found` or the resolver's stable failure
+ *   when the Session cannot be resolved.
+ * @throws {RemoteError} `gateway/bad-request` when the request violates a
+ *   question or payload bound.
+ * @throws {RemoteError} `session/approval-question-failed` when the Session
+ *   has no recorded model route, or the model call fails.
+ */
+@Remote({ mode: 'stream' }) async *askApproval( request: SessionApprovalQuestionRequest, signal: AbortSignal, ): AsyncIterable<string>
+
+/**
  * Read one cold-safe, message-aligned Session history page.
  * @param request - durable address, optional fixed cut, backward cursor, and page budget.
  * @param signal - cancellation for persistence reads.

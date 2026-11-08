@@ -1,6 +1,8 @@
 /** Browser approval consumer over the existing scoped Remote Event waterfall. */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
+import type { SessionApprovalQuestionRequest } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -14,6 +16,9 @@ import { PendingApproval } from './contract/slots.ts'
 import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
 
 export type {
+  ApprovalAskChannel,
+  ApprovalAskInput,
+  ApprovalAskTurn,
   ApprovalCardInput,
   ApprovalComposerProps,
   ApprovalDecision,
@@ -24,7 +29,7 @@ export type {
 export type { ApprovalKey } from './locales.ts'
 
 /** Required services: Agent scopes, Remote Events, Session UI, Slot registry, and copy. */
-export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale']
+export const inject = ['sessions', 'remote', 'remote.session', 'uiSession', 'slots', 'locale']
 
 const NS = 'approval'
 
@@ -49,6 +54,7 @@ async function answerApproval(
     ...(request.callId === undefined
       ? {}
       : { callId: request.callId }),
+    ...(request.toolArguments === undefined ? {} : { toolArguments: request.toolArguments }),
     ...(request.reason === undefined ? {} : { reason: request.reason }),
     ...(request.displayReason === undefined ? {} : { displayReason: request.displayReason }),
     ...(request.signal === undefined ? {} : { signal: request.signal }),
@@ -102,6 +108,8 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: () => ({
       resolveReason: (reason: NonNullable<PendingApproval['displayReason']>) => ctx.locale.resolveText(reason),
+      askApproval: (request: SessionApprovalQuestionRequest, signal: AbortSignal) =>
+        ctx.remote.session.askApproval(request, signal),
     }),
   }, ApprovalPanel))
   ctx.remote.$on('approval/request', function (request, next) {

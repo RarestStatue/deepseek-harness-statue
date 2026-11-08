@@ -880,7 +880,7 @@ describe('ToolRuntime', () => {
       expect(result).toMatchObject({ isError: false, content: [{ type: 'text', text: 'hi' }] })
       expect(seen).toHaveLength(1)
       expect(seen[0]).toMatchObject({
-        agent, toolName: 'echo', callId: 'c1', reason: 'hook wants a human', displayReason: { en: 'Allow it?', zh: '允许吗？' },
+        agent, toolName: 'echo', callId: 'c1', toolArguments: { text: 'hi' }, reason: 'hook wants a human', displayReason: { en: 'Allow it?', zh: '允许吗？' },
       })
       expect(seen[0]?.signal).toBe(controller.signal)
     })

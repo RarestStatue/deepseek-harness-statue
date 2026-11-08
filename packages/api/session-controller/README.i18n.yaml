@@ -15,8 +15,8 @@
   en: 1fdf707322fb6996
   zh: 0204f7e9d4aa3cce
 /session-controller/use-this-package:
-  en: d3d53e899960d96e
-  zh: 16b2bc7fe74215d8
+  en: f92d5b07f461a6e2
+  zh: 1d25f95e2934519e
 /session-controller/client-references:
   en: 41bdda1ac32df558
   zh: aa5d0e325924066b
@@ -27,11 +27,20 @@
   en: c92590fbaf75e45e
   zh: fcac67017bb0e3ab
 /session-controller/model-experience:
-  en: 30b917bf822bb4df
-  zh: b0b023b5b526c317
-/session-controller/model-experience/kv-cache-effect:
-  en: 22fc0c9dbedd3bb6
-  zh: fad040ca55fd0e0a
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/session-controller/model-experience/approval-side-question:
+  en: b38abe9fc71fb7a0
+  zh: 52cd54d0fa2bacb6
+/session-controller/model-experience/approval-side-question/what-the-model-sees:
+  en: 71781f5eec91a9a0
+  zh: d353877d3e4de50a
+/session-controller/model-experience/approval-side-question/token-effect:
+  en: 46467b7cad9ccf2e
+  zh: b96ac83e1cc9263f
+/session-controller/model-experience/approval-side-question/kv-cache-effect:
+  en: 706ddf0ffd8e61b2
+  zh: cb48c1ac3bf20ced
 /session-controller/known-limitations-and-deferred-work:
   en: 5db0f9f69a8be926
   zh: 6ba1cc4a3850fcbc
