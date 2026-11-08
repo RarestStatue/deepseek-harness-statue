@@ -2786,6 +2786,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'acknowledgement that cancellation was requested.',
       },
       {
+        signature: '@Remote({ mode: \'stream\' }) async *askApproval( request: SessionApprovalQuestionRequest, signal: AbortSignal, ): AsyncIterable<string>',
+        description: 'Stream a model answer about one pending tool approval for the approval card. Resolves the Session\'s live Agent, then asks the Session\'s current `request/header` provider/model to explain the pending call. The request appends no Session event and changes no Session state: the exchange is UI assistance and never enters the Session log or surface.',
+        parameters: [{ name: 'request', description: 'Session, pending call identity and arguments, approval reason, earlier side-conversation exchanges, and the question.' }, { name: 'signal', description: 'cancellation owned by the Remote stream carrier.' }],
+        returns: 'text deltas of one answer, in generation order.',
+        throws: ['{RemoteError} `session/not-found` or the resolver\'s stable failure when the Session cannot be resolved.', '{RemoteError} `gateway/bad-request` when the request violates a question or payload bound.', '{RemoteError} `session/approval-question-failed` when the Session has no recorded model route, or the model call fails.'],
+      },
+      {
         signature: '@Remote events(request: SessionPageRequest, signal: AbortSignal): Promise<SessionEventsPage>',
         description: 'Read one cold-safe, message-aligned Session history page.',
         parameters: [{ name: 'request', description: 'durable address, optional fixed cut, backward cursor, and page budget.' }, { name: 'signal', description: 'cancellation for persistence reads.' }],
@@ -5621,7 +5628,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ApprovalRequestEvent',
-    declaration: 'export interface ApprovalRequestEvent {\n    readonly agent: Agent;\n    readonly toolName: string;\n    readonly callId?: ToolCallId;\n    readonly reason?: string;\n    readonly displayReason?: {\n        readonly en: string;\n        readonly [locale: string]: string;\n    };\n    readonly signal?: AbortSignal;\n}',
+    declaration: 'export interface ApprovalRequestEvent {\n    readonly agent: Agent;\n    readonly toolName: string;\n    readonly callId?: ToolCallId;\n    readonly reason?: string;\n    readonly toolArguments?: JsonValue;\n    readonly displayReason?: {\n        readonly en: string;\n        readonly [locale: string]: string;\n    };\n    readonly signal?: AbortSignal;\n}',
   },
   {
     name: 'ArchiveSessionOptions',
@@ -8298,6 +8305,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionAddress',
     declaration: 'export type SessionAddress = {\n    readonly kind: \'session\';\n    readonly sessionId: SessionId;\n} | {\n    readonly kind: \'subagent\';\n    readonly parentSessionId: SessionId;\n    readonly childSessionId: SessionId;\n    readonly mode: \'one-shot\' | \'continuable\' | \'unknown\';\n};',
+  },
+  {
+    name: 'SessionApprovalQuestionRequest',
+    declaration: 'export interface SessionApprovalQuestionRequest {\n    readonly sessionId: SessionId;\n    readonly toolName: string;\n    readonly toolArguments?: JsonValue;\n    readonly reason?: string;\n    readonly question: string;\n    readonly history: readonly SessionApprovalQuestionTurn[];\n}',
+  },
+  {
+    name: 'SessionApprovalQuestionTurn',
+    declaration: 'export interface SessionApprovalQuestionTurn {\n    readonly role: \'user\' | \'assistant\';\n    readonly text: string;\n}',
   },
   {
     name: 'SessionAssistantStreamAttempt',

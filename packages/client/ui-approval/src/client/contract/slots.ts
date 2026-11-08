@@ -2,6 +2,9 @@
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
+  SessionApprovalQuestionRequest, SessionApprovalQuestionTurn,
+} from '@deepseek-ai/dsh-api-session-controller/types'
+import type {
   PropsLocale, PropsRenderFactories, PropsRuntime,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ApprovalKey } from '../locales.ts'
@@ -64,6 +67,8 @@ export interface ApprovalPresentationRequest {
   readonly toolName: string
   /** Tool call correlated with the request. */
   readonly callId?: ToolCallId
+  /** Losslessly JSON arguments of the pending call, when the asker has them. */
+  readonly toolArguments?: SessionApprovalQuestionRequest['toolArguments']
   /** Human-readable reason supplied by the requester. */
   readonly reason?: string
   /** Localized presentation copy; the audit reason remains unchanged. */
@@ -90,6 +95,8 @@ export class PendingApproval {
   readonly toolName: string
   /** Correlated Tool call, when supplied by the asker. */
   readonly callId: ToolCallId | undefined
+  /** Losslessly JSON arguments of the pending call, when supplied by the asker. */
+  readonly toolArguments: SessionApprovalQuestionRequest['toolArguments']
   /** Human-readable reason supplied by the asker. */
   readonly reason: string | undefined
   /** Localized presentation copy, when supplied by the asker. */
@@ -114,6 +121,7 @@ export class PendingApproval {
     this.key = `approval:${String(nextApprovalKey)}`
     this.toolName = request.toolName
     this.callId = request.callId
+    this.toolArguments = request.toolArguments
     this.reason = request.reason
     this.displayReason = request.displayReason
     const completion = Promise.withResolvers<ApprovalDecision>()
@@ -193,6 +201,35 @@ export interface ApprovalInjected {
    * @returns text for the active UI language.
    */
   resolveReason(reason: NonNullable<ApprovalPresentationRequest['displayReason']>): string
+  /**
+   * Stream one model answer about the pending approval request.
+   * @param request - Session, pending call identity, arguments, reason and question.
+   * @param signal - aborts the answer when the card releases it.
+   * @returns text deltas of one answer.
+   */
+  askApproval: (request: SessionApprovalQuestionRequest, signal: AbortSignal) => AsyncIterable<string>
+}
+
+/** One completed exchange in an approval side conversation. */
+export type ApprovalAskTurn = SessionApprovalQuestionTurn
+
+/** Question and earlier exchanges for one approval side-conversation request. */
+export interface ApprovalAskInput {
+  /** The user's question about the pending request. */
+  readonly question: string
+  /** Earlier exchanges of this side conversation, oldest first. */
+  readonly history: readonly ApprovalAskTurn[]
+}
+
+/** Caller-provided side conversation about the pending request. */
+export interface ApprovalAskChannel {
+  /**
+   * Ask the Session's model about the pending request and stream its answer.
+   * @param input - question and earlier exchanges.
+   * @param signal - aborts the answer when the card no longer needs it.
+   * @returns text deltas of one answer.
+   */
+  ask(input: ApprovalAskInput, signal: AbortSignal): AsyncIterable<string>
 }
 
 /** Full props of the approval composer takeover. */
@@ -227,4 +264,6 @@ export interface ApprovalCardInput {
   onReject: () => Promise<void>
   /** Explicit persistent choice; absent when the caller cannot save permission. */
   onAlways?: () => Promise<void>
+  /** Optional side conversation; absent cards offer only the decisions. */
+  ask?: ApprovalAskChannel
 }

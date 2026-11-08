@@ -149,7 +149,7 @@ describe.each(MODE === 'record' ? ['button'] as const : ['button', 'keyboard'] a
             viewport: window.innerHeight,
           }
         })
-        expect(geometry.buttons).toBe(2)
+        expect(geometry.buttons).toBe(3)
         expect(geometry.scrolls).toBe(true)
         // The panel and composer share one cap; allow sub-pixel layout variance.
         expect(Math.abs(geometry.capped - composerCap)).toBeLessThan(1)

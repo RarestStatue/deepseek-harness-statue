@@ -20,6 +20,7 @@ type ApprovalListener = (
   request: {
     toolName: string
     callId?: string
+    toolArguments?: PendingApproval['toolArguments']
     reason?: string
     displayReason?: PendingApproval['displayReason']
     signal?: AbortSignal
@@ -37,6 +38,7 @@ interface PluginBench {
   readonly register: ReturnType<typeof vi.fn>
   readonly injectSlot: ReturnType<typeof vi.fn>
   readonly shortcuts: ReturnType<typeof vi.fn<(entry: { label: () => string }) => () => void>>
+  readonly remoteAskApproval: ReturnType<typeof vi.fn>
   releasePending(): Promise<void>
   registration(): {
     options: {
@@ -46,6 +48,9 @@ interface PluginBench {
     component: unknown
   }
 }
+
+/** One answer stream with no chunks, for callers that only exercise mounting. */
+async function* emptyStream(): AsyncGenerator<string, void, undefined> {}
 
 async function setupPlugin(): Promise<PluginBench> {
   const ctx = new Context()
@@ -79,12 +84,16 @@ async function setupPlugin(): Promise<PluginBench> {
     const dispose = ctx.effect(() => mount())
     return () => { void dispose() }
   })
+  const remoteAskApproval = vi.fn((_request: unknown, _signal: AbortSignal) => emptyStream())
+  const remoteSession = { askApproval: remoteAskApproval }
   ctx.provide('remote', {
     $on: (_event: string, callback: ApprovalListener) => {
       listener = callback
       return () => {}
     },
+    session: remoteSession,
   } as never)
+  ctx.provide('remote.session', remoteSession as never)
   ctx.provide('sessions', { scopeOf } as never)
   ctx.provide('uiSession', { registerPendingInteraction } as never)
   ctx.provide('slots', { inject: injectSlot, register, registerFactory: vi.fn() } as never)
@@ -96,7 +105,7 @@ async function setupPlugin(): Promise<PluginBench> {
     resolveText: (reason: NonNullable<PendingApproval['displayReason']>) => reason.en,
   } as never)
 
-  const fiber = ctx.plugin({ apply })
+  const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
   if (listener === undefined) throw new Error('approval listener was not registered')
   return {
@@ -109,6 +118,7 @@ async function setupPlugin(): Promise<PluginBench> {
     register,
     injectSlot,
     shortcuts,
+    remoteAskApproval,
     async releasePending() {
       const delegates = [...pending.values()]
       pending.clear()
@@ -137,6 +147,7 @@ describe('PendingApproval', () => {
     const pending = new PendingApproval(id('s1'), {
       toolName: 'bash',
       callId: 'call-1' as ToolCallId,
+      toolArguments: { command: 'rm -rf build' },
       reason: 'needs access',
       signal: controller.signal,
     })
@@ -147,6 +158,7 @@ describe('PendingApproval', () => {
     expect(pending.sessionId).toBe(id('s1'))
     expect(pending.toolName).toBe('bash')
     expect(pending.callId).toBe('call-1')
+    expect(pending.toolArguments).toEqual({ command: 'rm -rf build' })
     expect(pending.reason).toBe('needs access')
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
     expect(() => { pending.abort(new Error('late')) }).not.toThrow()
@@ -234,6 +246,7 @@ describe('approval Remote Event consumer', () => {
     const result = bench.listener.call(scope.ctx, {
       toolName: 'bash',
       callId: 'call-1',
+      toolArguments: { command: 'rm -rf build' },
       reason: 'needs access',
       displayReason: { en: 'Display reason', zh: '展示原因' },
       signal: controller.signal,
@@ -251,6 +264,7 @@ describe('approval Remote Event consumer', () => {
       sessionId: id('s1'),
       toolName: 'bash',
       callId: 'call-1',
+      toolArguments: { command: 'rm -rf build' },
       reason: 'needs access',
     })
 
@@ -262,6 +276,25 @@ describe('approval Remote Event consumer', () => {
     expect(bench.register).toHaveBeenCalledOnce()
     expect(bench.disposeSlot).not.toHaveBeenCalled()
     await scope.fiber.dispose()
+  })
+
+  it('forwards one ask request through the Session Remote stream', async () => {
+    const bench = await setupPlugin()
+    const { options } = bench.registration()
+    const controller = new AbortController()
+    const request = {
+      sessionId: id('s1'),
+      toolName: 'bash',
+      question: 'What will it run?',
+      history: [],
+    }
+
+    const stream = options.inject().askApproval(request, controller.signal)
+
+    expect(bench.remoteAskApproval).toHaveBeenCalledExactlyOnceWith(request, controller.signal)
+    const chunks: string[] = []
+    for await (const chunk of stream) chunks.push(chunk)
+    expect(chunks).toEqual([])
   })
 
   it('propagates request cancellation after removing the pending object', async () => {
@@ -324,25 +357,64 @@ describe('approval Remote Event consumer', () => {
   })
 })
 
+const panelMessages: Record<string, string> = {
+  waiting: 'Waiting',
+  'detail.aria': 'Approval details',
+  escalation: 'Tool asks',
+  reject: 'Reject',
+  allowOnce: 'Allow once',
+  allowAlways: 'Always allow',
+  ask: 'Ask',
+  'ask.placeholder': 'Ask about this action',
+  'ask.send': 'Send',
+  'ask.thinking': 'Thinking…',
+  'ask.failed': 'Could not get an answer. Try again.',
+  'ask.log.aria': 'Approval question log',
+  'ask.close': 'Close',
+  'markdown.copy': 'Copy',
+  'markdown.copied': 'Copied',
+  'markdown.footnotes': 'Footnotes',
+}
+
 function panelProps(
   pending: PendingApproval,
   renderSlot: FactoryComponentPropsOf<'conversation.approval.card'>['renderSlot'] = vi.fn(() => null),
+  askApproval: ApprovalInjected['askApproval'] = () => emptyStream(),
 ): ApprovalComposerProps {
-  const messages: Record<string, string> = {
-    waiting: 'Waiting',
-    'detail.aria': 'Approval details',
-    escalation: `Tool ${pending.toolName} asks`,
-    reject: 'Reject',
-    allowOnce: 'Allow once',
-    allowAlways: 'Always allow',
-  }
+  const t = (key: string): string => (key === 'escalation' ? `Tool ${pending.toolName} asks` : panelMessages[key] ?? key)
   return {
     matched: pending,
-    renderFactorySlot: (_name: string, input: ApprovalCardInput) => <ApprovalCard {...{ ...input, renderSlot,
-      t: (key: string) => messages[key] ?? key } as FactoryComponentPropsOf<'conversation.approval.card'>} />,
+    renderFactorySlot: (_name: string, input: ApprovalCardInput) => <ApprovalCard {...{ ...input, renderSlot, t } as FactoryComponentPropsOf<'conversation.approval.card'>} />,
     resolveReason: (reason: NonNullable<PendingApproval['displayReason']>) => reason.en,
-    t: (key: string) => messages[key] ?? key,
+    t,
+    askApproval,
   } as ApprovalComposerProps
+}
+
+/** Props of a card rendered without the panel adapter, for caller-owned cards. */
+function appCardProps(): FactoryComponentPropsOf<'conversation.approval.card'> {
+  return {
+    requestKey: 'app-approval',
+    title: 'Control this app?',
+    canAnswer: () => true,
+    onAllow: vi.fn(async () => {}),
+    onReject: vi.fn(async () => {}),
+    renderSlot: vi.fn(() => null),
+    t: (key: string) => key,
+  } as FactoryComponentPropsOf<'conversation.approval.card'>
+}
+
+/** Open the side conversation of a rendered panel and return its question box. */
+function openAsk(): HTMLTextAreaElement {
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+  return screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Ask about this action' })
+}
+
+/** Type and submit one question through the rendered side conversation. */
+function submitQuestion(question: string): void {
+  const box = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Ask about this action' })
+  fireEvent.change(box, { target: { value: question } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 }
 
 describe('ApprovalPanel', () => {
@@ -511,9 +583,198 @@ describe('ApprovalPanel', () => {
   })
 })
 
+describe('approval side conversation', () => {
+  it('offers the ask action only when the caller provides one', () => {
+    const props = appCardProps()
+    const view = render(<ApprovalCard {...props} />)
+
+    expect(screen.queryByRole('button', { name: 'ask' })).toBeNull()
+    view.rerender(<ApprovalCard {...props} ask={{ ask: () => emptyStream() }} />)
+    expect(screen.getByRole('button', { name: 'ask' })).toBeTruthy()
+  })
+
+  it('expands one inline question box, focuses it, and collapses it again', () => {
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending)} />)
+    const toggle = screen.getByRole('button', { name: 'Ask' })
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+
+    const box = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Ask about this action' })
+    expect(document.activeElement).toBe(box)
+    expect(screen.getByRole('log', { name: 'Approval question log' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close' }).getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Ask' }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('streams one answer and forwards completed turns as history', async () => {
+    const gate = Promise.withResolvers<undefined>()
+    const askApproval = vi.fn(async function* () {
+      yield 'First '
+      await gate.promise
+      yield 'answer'
+    })
+    const pending = new PendingApproval(id('s1'), {
+      toolName: 'bash',
+      toolArguments: { command: 'ls' },
+      reason: 'needs access',
+    })
+    render(<ApprovalPanel {...panelProps(pending, undefined, askApproval)} />)
+    openAsk()
+    submitQuestion('What does it do?')
+
+    await waitFor(() => { expect(screen.getByText('First')).toBeTruthy() })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reject' }).disabled).toBe(false)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Allow once' }).disabled).toBe(false)
+
+    gate.resolve(undefined)
+    await waitFor(() => { expect(screen.getByText('First answer')).toBeTruthy() })
+    expect(askApproval).toHaveBeenCalledExactlyOnceWith({
+      sessionId: id('s1'),
+      toolName: 'bash',
+      toolArguments: { command: 'ls' },
+      reason: 'needs access',
+      question: 'What does it do?',
+      history: [],
+    }, expect.any(AbortSignal))
+
+    submitQuestion('And then?')
+    await waitFor(() => {
+      expect(askApproval).toHaveBeenLastCalledWith(expect.objectContaining({
+        question: 'And then?',
+        history: [
+          { role: 'user', text: 'What does it do?' },
+          { role: 'assistant', text: 'First answer' },
+        ],
+      }), expect.any(AbortSignal))
+    })
+  })
+
+  it('restores the question and reports a localized failure', async () => {
+    const askApproval = vi.fn(async function* () { throw new Error('model offline') })
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending, undefined, askApproval)} />)
+    openAsk()
+    submitQuestion('Why?')
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe('Could not get an answer. Try again.')
+    })
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Ask about this action' }).value).toBe('Why?')
+  })
+
+  it('sends on Enter but not Shift+Enter or IME candidate keys', async () => {
+    const gate = Promise.withResolvers<undefined>()
+    const askApproval = vi.fn(async function* () {
+      yield 'ok'
+      await gate.promise
+    })
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending, undefined, askApproval)} />)
+    const box = openAsk()
+
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' })
+    fireEvent.keyDown(box, { key: 'a', code: 'KeyA' })
+    expect(askApproval).not.toHaveBeenCalled()
+
+    fireEvent.change(box, { target: { value: 'Why?' } })
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter', shiftKey: true })
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter', isComposing: true })
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter', keyCode: 229 })
+    expect(askApproval).not.toHaveBeenCalled()
+    expect(box.value).toBe('Why?')
+
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' })
+    expect(askApproval).toHaveBeenCalledOnce()
+    await waitFor(() => { expect(screen.getByText('ok')).toBeTruthy() })
+    // Enter while an answer streams must not start another question.
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' })
+    expect(askApproval).toHaveBeenCalledOnce()
+    await act(async () => { gate.resolve(undefined); await gate.promise })
+  })
+
+  it('aborts the in-flight answer when a decision is submitted', async () => {
+    const gate = Promise.withResolvers<undefined>()
+    let captured: AbortSignal | undefined
+    const askApproval = vi.fn(async function* (_request: unknown, signal: AbortSignal) {
+      captured = signal
+      yield 'partial'
+      await gate.promise
+    })
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending, undefined, askApproval)} />)
+    openAsk()
+    submitQuestion('Why?')
+    await waitFor(() => { expect(screen.getByText('partial')).toBeTruthy() })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+
+    await expect(pending.result).resolves.toBe('rejected')
+    expect(captured?.aborted).toBe(true)
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Ask' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Allow once' }).disabled).toBe(true)
+    // The stream ends normally after the abort; its completion must be discarded quietly.
+    await act(async () => { gate.resolve(undefined); await gate.promise; await Promise.resolve() })
+  })
+
+  it('keeps a stream failure quiet after a decision aborted it', async () => {
+    const gate = Promise.withResolvers<undefined>()
+    const askApproval = vi.fn(async function* () {
+      yield 'partial'
+      await gate.promise
+      throw new Error('stream lost')
+    })
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending, undefined, askApproval)} />)
+    openAsk()
+    submitQuestion('Why?')
+    await waitFor(() => { expect(screen.getByText('partial')).toBeTruthy() })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+    await expect(pending.result).resolves.toBe('rejected')
+    await act(async () => {
+      gate.resolve(undefined)
+      await gate.promise
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  })
+
+  it('discards answer deltas that arrive after a decision aborted the stream', async () => {
+    const gate = Promise.withResolvers<undefined>()
+    const askApproval = vi.fn(async function* () {
+      yield 'first'
+      await gate.promise
+      yield 'second'
+    })
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending, undefined, askApproval)} />)
+    openAsk()
+    submitQuestion('Why?')
+    await waitFor(() => { expect(screen.getByText('first')).toBeTruthy() })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+    await expect(pending.result).resolves.toBe('rejected')
+    expect(screen.queryByRole('textbox')).toBeNull()
+
+    await act(async () => {
+      gate.resolve(undefined)
+      await gate.promise
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  })
+})
+
 describe('package entries', () => {
   it('declares its service edges and keeps the Host half inert', () => {
-    expect(inject).toEqual(['sessions', 'remote', 'uiSession', 'slots', 'locale'])
+    expect(inject).toEqual(['sessions', 'remote', 'remote.session', 'uiSession', 'slots', 'locale'])
     expect(() => { nodeApply() }).not.toThrow()
   })
 })

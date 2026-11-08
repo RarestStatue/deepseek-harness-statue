@@ -6,7 +6,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
+import { assertNever, deepFreeze, isJsonValue, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import { TOOL_ABORTED, TOOL_ABORTED_BEFORE_DISPATCH, ToolNotFoundError, ToolOutputError } from './contracts.ts'
 import { validateJsonSchemaValue } from './json-schema.ts'
 import type { ToolsService } from './index.ts'
@@ -52,6 +52,20 @@ interface ToolCancellationState {
 interface FusedToolSignal {
   readonly signal: AbortSignal
   dispose(): void
+}
+
+/**
+ * Presentation-only arguments for one approval request. The execution pipeline
+ * snapshots and validates lossless JSON when it creates the execution, but the
+ * execution type still exposes them as `unknown`; an execution that reached
+ * approval therefore always carries the field.
+ * @param exec - pending execution whose arguments the pipeline already validated.
+ * @returns the optional `toolArguments` field to spread into the approval request.
+ */
+function approvalToolArguments(exec: ToolExecution): { readonly toolArguments?: JsonValue } {
+  const parsed = exec.arguments
+  /* v8 ignore next -- createExecution rejected any non-lossless-JSON arguments before this stage. */
+  return isJsonValue(parsed) ? { toolArguments: parsed as JsonValue } : {}
 }
 
 /**
@@ -450,6 +464,7 @@ export class ToolExecutionPipeline {
       agent: exec.agent,
       toolName: exec.name,
       callId: exec.callId,
+      ...approvalToolArguments(exec),
       ...ask.reason !== undefined ? { reason: ask.reason } : {},
       ...ask.displayReason !== undefined ? { displayReason: ask.displayReason } : {},
       signal: exec.signal,

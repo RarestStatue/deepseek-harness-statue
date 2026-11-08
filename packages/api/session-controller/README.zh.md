@@ -41,6 +41,8 @@ Client journal 在发布 follow 快照、live entry 或历史页之前验证当�
 
 `events` 从一个持久切点读取一页时间正序的记录，返回记录、`hasMore` 和包含末项的 `cursor`；省略 `throughSeq` 时选取观察到的日志末尾，兼容的 `page` 方法提供同样的读取，但入口已弃用。`events`、`observeEvent` 和 `follow` 接收 Address，投影和状态操作接收 Session ID。分页读取与 Follow 开场会校验传入的 Address。纯 `observeEvent` 和 `observeProjections` 订阅既不获取 Observation，也不确认实体存在：其 `ready` 帧不携带快照游标。
 
+`askApproval` 为审批卡片流式生成关于一个待处理工具调用的模型回答。它解析该 Session 的 Agent，拒绝空白或超长的问题，使用当前 `request/header` 的服务商/模型，并发送固定指令以及待处理调用的名称、无损 JSON 参数、审批原因、该旁路会话此前的交流和本次问题；调用结束前持续产出文本增量。该请求不追加 Session 事件，也不改变 Session 状态。它属于界面辅助：交流不会进入 Session surface 或日志，也不是授权输入。
+
 列表行在状态可用时携带 `formatStatus`，Client 无需请求其投影即可识别需要迁移的 Session。
 
 Host 仅在配置的工作时间片耗尽时，于完整条目之间让出事件循环；剩余工作较少时直接返回，不强制让出。每行及每次让出之后检查请求取消，取消时拒绝返回部分结果。每行同步计算；列表不承诺跨 Session 的统一快照。已经进入冷态队列的 Session 若在让出期间接入，仍返回缓存行：Client 对进行中请求的变更重放会纠正其可用性，带序号的投影会覆盖缓存提示。已接入 Session 的摘要通过 `sessionListMetadata` 投影句柄读取是否为空和最后一次提示词的最近活动时间，其投影提示携带通过 `snapshot` 计算的每个摘要 key。已接入 Session 的首次摘要在其完整内存日志上计算这些投影，之后的摘要增量推进；这次计算在单行的同步工作内进行，`listWorkSliceMs` 无法切分它。
@@ -117,11 +119,19 @@ Blockquote 作为普通 prompt 文本传递，不携带 quote 元数据。本地
 <a id="model-experience"></a>
 ## 模型体验
 
-无；任何模型可见效果都由被调用的 Agent 命令负责。
+### 审批旁路提问
+
+#### 模型看到什么
+
+被调用的 Agent 命令负责 Session 的模型可见对话效果。`session/askApproval` 还会为审批卡片中的每个问题发起一次辅助请求：固定指令、待处理调用的名称与无损 JSON 参数、审批原因、该旁路会话此前的交流以及本次问题，经 Session 当前 `request/header` 的服务商/模型发送，并限制输出 token、不提供工具。回答只流式返回 Client；交流不会被持久化、不会重放，也绝不进入 Session surface。
+
+#### Token 影响
+
+每个提问增加一次不缓存的请求。Session 的对话请求不受影响。
 
 #### KV Cache 影响
 
-无直接影响；模型请求仍由 Agent 和 LLM（大语言模型）包拥有。
+对 Session 的对话无影响；每个旁路问题都是其缓存前缀之外的独立请求。
 
 ## 已知限制与延期工作
 

@@ -207,6 +207,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'session/title-invalid': { readonly sessionId: SessionId }
     'session/fork-unavailable': { readonly sessionId: SessionId }
     'session/migration-required': { readonly sessionId: SessionId }
+    /** The approval side-question model call could not produce an answer. */
+    'session/approval-question-failed': { readonly reason: string }
     'subagent/not-found': {
       readonly parentSessionId: SessionId
       readonly childSessionId: SessionId
@@ -223,6 +225,43 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 export interface SkillListRequest {
   readonly sessionId: SessionId
 }
+
+/** One completed question/answer exchange of an approval side conversation. */
+export interface SessionApprovalQuestionTurn {
+  /** Who authored this turn. */
+  readonly role: 'user' | 'assistant'
+  /** Complete turn text as displayed. */
+  readonly text: string
+}
+
+/**
+ * One user question about a pending tool approval. The Session's current model
+ * route answers it from the pending call's identity, arguments, and approval
+ * reason; the exchange is UI assistance and never enters the Session surface.
+ */
+export interface SessionApprovalQuestionRequest {
+  /** Session whose current model route answers. */
+  readonly sessionId: SessionId
+  /** Tool whose pending call is under review. */
+  readonly toolName: string
+  /** Losslessly JSON arguments of the pending call, when the caller has them. */
+  readonly toolArguments?: JsonValue
+  /** The asker's reason for requesting approval, when it recorded one. */
+  readonly reason?: string
+  /** The user's question; non-blank after trimming. */
+  readonly question: string
+  /** Earlier exchanges of this side conversation, oldest first. */
+  readonly history: readonly SessionApprovalQuestionTurn[]
+}
+
+/** Longest question accepted by the approval side-question helper, in Unicode code points. */
+export const SESSION_APPROVAL_QUESTION_MAX_CHARS = 2_000
+
+/** Most earlier exchanges the approval side-question helper forwards to the model. */
+export const SESSION_APPROVAL_QUESTION_MAX_HISTORY = 12
+
+/** Output-token cap for one approval side-question answer. */
+export const SESSION_APPROVAL_QUESTION_MAX_TOKENS = 700
 
 /** One skill available to the Session's human-facing composer. */
 export interface SkillEntry {
