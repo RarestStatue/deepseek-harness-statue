@@ -24,6 +24,8 @@ When offered, **Always allow** is the highlighted primary button. Otherwise, the
 
 When a caller supplies the optional side-conversation channel, the card adds an **Ask** action beside the decisions. It opens an inline chatbox for the pending request: each question goes to the Session's current provider/model through the caller's channel, streamed answer deltas appear in the card, and Reject/Allow stay available while an answer streams. The exchange is ephemeral UI assistance — the caller's channel owns the transport, neither the question nor the answer enters the Session conversation or approval audit, and answering the request aborts a pending answer.
 
+Callers can supply localized warning copy through the shared card's optional `warning` field, with paragraphs separated by blank lines (`\n\n`). Hovering or keyboard-focusing the tag opens a formatted nonmodal card; clicking or tapping also opens it. The pointer can cross into the card to read or select its text. Leaving both surfaces closes it after a short grace period unless keyboard focus remains inside. Moving focus outside, clicking outside, and Escape also dismiss it without rejecting the request. Hover does not move focus. Moving focus elsewhere also closes a hover-open card, including when a foreground modal takes focus. Switching away from the window or hiding the browser tab closes it without restoring focus. Foreground modals and input-method composition retain their keyboard handling. CSS anchors position the card above the tag with window-edge fallbacks and internal scrolling when space is limited.
+
 <a id="model-experience"></a>
 ## Model Experience
 
